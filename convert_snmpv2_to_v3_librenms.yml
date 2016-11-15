@@ -1,0 +1,121 @@
+---
+- hosts: ALL_SWITCHES
+  gather_facts: no
+  connection: local
+
+### This was my first playbook with any complexity.  Feel free to modify it for your needs.  
+### It is used for converting snmpv2 switches to v3. Older switches (we have 2950s) need to use DES instead of AES
+### In addition, the playbook deletes an entry from our LibreNMS monitor and re-adds it with the correct SNMP data.
+
+  vars_prompt:
+  - name: "mgmt_username"
+    prompt: "Username"
+    private: no
+  - name: "mgmt_password"
+    prompt: "Password"
+
+  tasks:
+
+  - name: SYS | Define provider
+    set_fact:
+      provider:
+        host: "{{ inventory_hostname }}" 
+        username: "{{ mgmt_username }}"
+        password: "{{ mgmt_password }}"
+
+  - name: IOS | Convert SNMPv2 to v3 only if Device is v2 (DES)
+    when: "'2950' in inventory_hostname"
+    ios_config:
+      provider: "{{ provider }}"
+      replace: line
+      lines:
+        - "snmp-server group NEWV3GROUP v3 auth"
+      before:
+        - "no snmp-server community OLDV2COMMUNITY RO"
+      after:
+        - "snmp-server user NEWV3USER NEWV3GROUP v3 auth sha SHAKEY priv des PRIVKEY access 1"
+    register: snmpchange
+
+  - name: Delete SNMPv2 Device from Netmon (DES)
+    when: 
+      - snmpchange is changed
+      - "'2950' in inventory_hostname"
+    uri: 
+      provider: "{{ provider }}"
+      url: "http://librenms.server.com/api/v0/devices/{{ inventory_hostname }}.server.com"
+      method: DELETE
+      HEADER_X-Auth-Token: LIBRENMSAUTHTOKEN
+      body_format: json
+    ignore_errors: yes    
+
+  - name: Add Device back as SNMPv3 to Netmon (DES)
+    when: 
+      - snmpchange is changed
+      - "'2950' in inventory_hostname"
+    uri: 
+      provider: "{{ provider }}"
+      url: "http://librenms.server.com/api/v0/devices"
+      method: POST
+      HEADER_X-Auth-Token: LIBRENMSAUTHTOKEN
+      body_format: json
+      body: ' { "hostname" : "{{ inventory_hostname }}.server.com", "version": "v3", "authlevel" : "AuthPriv", "authname" : "NEWV3GROUP", "authpass" : "SHAKEY", "authalgo" : "SHA", "cryptoalgo" : "DES", "cryptopass" : "PRIVKEY", "force_add" : "1"}'
+      validate_certs: no
+      return_content: yes
+    ignore_errors: yes
+
+  - name: IOS | Write Memory
+    when: snmpchange.changed
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "wr mem"
+
+  - name: IOS | Convert SNMPv2 to v3 only if Device is v2 (AES)
+    when: "'2950' not in inventory_hostname"
+    ios_config:
+      provider: "{{ provider }}"
+      replace: line
+      lines:
+        - "snmp-server group NEWV3GROUP v3 auth"
+      before:
+        - "no snmp-server community OLDV2COMMUNITY RO"
+      after:
+        - "snmp-server user NEWV3USER NEWV3GROUP v3 auth sha SHAKEY priv aes 128 PRIVKEY access 1"
+    register: snmpchange
+
+  - name: Delete SNMPv2 Device from Netmon (AES)
+    when: 
+      - snmpchange.changed
+      - "'2950' not in inventory_hostname"
+    uri: 
+      provider: "{{ provider }}"
+      url: "http://librenms.server.com/api/v0/devices/{{ inventory_hostname }}.server.com"
+      method: DELETE
+      HEADER_X-Auth-Token: LIBRENMSAUTHTOKEN
+      body_format: json
+    ignore_errors: yes
+
+  - name: Add Device back as SNMPv3 to Netmon (AES)
+    when: 
+      - snmpchange.changed
+      - "'2950' not in inventory_hostname"
+    uri: 
+      provider: "{{ provider }}"
+      url: "http://librenms.server.com/api/v0/devices"
+      method: POST
+      HEADER_X-Auth-Token: LIBRENMSAUTHTOKEN
+      body_format: json
+      body: ' { "hostname" : "{{ inventory_hostname }}.server.com", "version": "v3", "authlevel" : "AuthPriv", "authname" : "NEWV3GROUP", "authpass" : "SHAKEY", "authalgo" : "SHA", "cryptoalgo" : "AES", "cryptopass" : "PRIVKEY", "force_add" : "1"}'
+      validate_certs: no
+      return_content: yes
+    ignore_errors: yes
+
+
+
+  - name: IOS | Write Memory
+    when: snmpchange.changed
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "wr mem"
+

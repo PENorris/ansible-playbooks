@@ -1,0 +1,31 @@
+---
+- hosts: ALL_SWITCHES
+  gather_facts: no
+  connection: local
+ 
+  vars_prompt:
+  - name: "mgmt_username"
+    prompt: "Username"
+    private: no
+  - name: "mgmt_password"
+    prompt: "Password"
+
+  tasks:
+
+  - name: SYS | Define provider
+    set_fact:
+      provider:
+        host: "{{ inventory_hostname }}" 
+        username: "{{ mgmt_username }}"
+        password: "{{ mgmt_password }}"
+
+  - name: IOS | Output VTP version domain and mode?
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "sh vtp status | i running"
+        - "sh vtp status | i Operatin"
+        - "sh vtp status | i Domain"
+    register: vtp
+
+  - debug: msg="{{ vtp.stdout }}"

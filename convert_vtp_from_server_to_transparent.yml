@@ -1,0 +1,101 @@
+---
+- hosts: ALL_SWITCHES
+  gather_facts: no
+  connection: local
+
+### This playbook first converts all client and transparent devices to transparent v2.  After this is complete, it converts the server to transparent
+
+
+  vars_prompt:
+  - name: "mgmt_username"
+    prompt: "Username"
+    private: no
+  - name: "mgmt_password"
+    prompt: "Password"
+
+  tasks:
+
+  - name: SYS | Define provider
+    set_fact:
+      provider:
+        host: "{{ inventory_hostname }}" 
+        username: "{{ mgmt_username }}"
+        password: "{{ mgmt_password }}"
+
+  - name: IOS | Determine what VTP mode device is in
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "sh vtp status | i Operatin"
+    register: vtpmode
+
+  - name: IOS | Set Var to Client
+    when: '"Client" in vtpmode["stdout"][0]'
+    set_fact:
+      vtpsetting: vtpclient
+
+  - name: IOS | Set Var to Server
+    when: '"Server" in vtpmode["stdout"][0]'
+    set_fact:
+      vtpsetting: vtpserver
+
+  - name: IOS | Set Var to Transparent
+    when: '"Transparent" in vtpmode["stdout"][0]'
+    set_fact:
+      vtpsetting: vtptransparent
+
+  - name: IOS | Converting VTP Client to Transparent
+    when: vtpsetting == "vtpclient"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp mode transparent
+
+  - name: IOS | Converting to VTP ver 2
+    when: vtpsetting == "vtpclient" or vtpsetting == "vtptransparent"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp version 2
+
+  - name: IOS | Converting domain to FREEBACON
+    when: vtpsetting == "vtpclient" or vtpsetting == "vtptransparent"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp domain FREEBACON 
+
+  - name: IOS | Write Memory
+    when: vtpsetting == "vtpclient" or vtpsetting == "vtptransparent"
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "wr mem"
+
+- name: IOS | Converting VTP Server to Transparent
+    when: vtpsetting == "vtpserver"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp mode transparent
+
+  - name: IOS | Converting to VTP ver 2
+    when: vtpsetting == "vtpserver"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp version 2
+
+  - name: IOS | Converting domain to FREEBACON
+    when: vtpsetting == "vtpserver"
+    ios_config:
+      provider: "{{ provider }}"
+      lines: 
+        - vtp domain FREEBACON       
+
+  - name: IOS | Write Memory
+    when: vtpsetting == "vtpserver"
+    ios_command:
+      provider: "{{ provider }}"
+      commands:
+        - "wr mem"          
